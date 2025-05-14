@@ -3,12 +3,40 @@
 <head>
   <meta charset="utf-8" />
   <title>Omnichat Debug Client</title>
+
   <style>
-    body { margin:0; font-family:sans-serif; }
-    #log  { height:90vh; overflow:auto; padding:12px 16px 0; font-size:14px; }
-    #frm  { display:flex; padding:8px 16px; border-top:1px solid #eee; }
-    #msg  { flex:1; border:1px solid #ccc; border-radius:6px;
-            padding:6px 8px; font-size:14px; }
+    /* ── layout basics ────────────────────────────────────────────── */
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,sans-serif; }
+
+    /* message log: flex column so bubbles self-align left/right */
+    #log  {
+      height:90vh; overflow:auto; padding:16px;
+      display:flex; flex-direction:column; gap:8px;
+      background:#fafafa; font-size:15px;
+    }
+
+    /* bottom input bar */
+    #frm  {
+      display:flex; padding:12px 16px;
+      border-top:1px solid #e5e5e5; background:#fff;
+    }
+    #msg  {
+      flex:1; border:1px solid #ccc; border-radius:20px;
+      padding:10px 14px; font-size:15px;
+    }
+
+    /* ── chat bubbles à la iMessage ──────────────────────────────── */
+    .bubble {
+      max-width:80%; padding:10px 14px; border-radius:20px;
+      line-height:1.35; word-break:break-word;
+    }
+    .bot  { background:#e5e5ea; color:#000;
+            align-self:flex-start; border-bottom-left-radius:4px; }
+    .user { background:#007aff; color:#fff;
+            align-self:flex-end;   border-bottom-right-radius:4px; }
+
+    /* links stay legible inside bubbles */
+    a { color:inherit; text-decoration:underline; }
   </style>
 </head>
 
@@ -35,16 +63,25 @@ function escapeHtml(str){
 
 /** Turn Markdown links *and* bare URLs into clickable <a> tags */
 function linkify(str){
-  /* 1 . [label](https://link)         */
+  /* 1 . [label](https://link) */
   str = str.replace(
     /\[([^\]]+)]\((https?:\/\/[^\s)]+)\)/g,
     (_, label, url) => `<a href="${url}" target="_blank" rel="noopener">${label}</a>`
   );
-  /* 2 . bare https://link             */
+  /* 2 . bare https://link */
   return str.replace(
     /(https?:\/\/[^\s]+)/g,
     url => `<a href="${url}" target="_blank" rel="noopener">${url}</a>`
   );
+}
+
+/** add a left- or right-aligned bubble to the log */
+function addBubble(role, html){
+  const div = document.createElement("div");
+  div.className = `bubble ${role}`;
+  div.innerHTML = html;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
 }
 
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -72,9 +109,7 @@ ws.onmessage = e => {
     localStorage.setItem(SESSION_KEY, session);
   }
 
-  const safe = linkify(escapeHtml(d.answer));
-  log.innerHTML += `<p style="margin:4px 0">${safe}</p>`;
-  log.scrollTop  = log.scrollHeight;
+  addBubble("bot", linkify(escapeHtml(d.answer)));
 };
 
 /* ────────────────────────────────────────────────────────────────────────── */
@@ -91,9 +126,8 @@ document.getElementById("frm").onsubmit = e => {
     product: window.__CURRENT_PRODUCT_HANDLE__ || null
   }));
 
-  log.innerHTML += `<p style="color:#888;margin:4px 0">${val}</p>`;
+  addBubble("user", linkify(escapeHtml(val)));
   msg.value = "";
-  log.scrollTop = log.scrollHeight;
 };
   </script>
 </body>
