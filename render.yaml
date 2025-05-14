@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: omnichat-api               # choose any name you like
+    runtime: python
+    region: oregon                   # or frankfurt, singapore, etc.
+    buildCommand: |
+      pip install -r requirements.txt
+    startCommand: |
+      uvicorn app:app --host 0.0.0.0 --port $PORT
+    plan: free                       # dev/test – upgrade later if needed
+    envVars:
+      - key: ENV
+        value: prod                  # so settings.py picks prod mode
+      - key: OPENAI_API_KEY
+        sync: false                  # mark as secret – set in Render UI
+      - key: SHOP_URL
+        value: spectraflex-cables.myshopify.com
+      - key: SHOP_ADMIN_TOKEN
+        sync: false
+      - key: PINECONE_API_KEY
+        sync: false
+      - key: PINECONE_ENV
+        value: us-east-1-aws
+      - key: PINECONE_INDEX
+        value: spectraflex-prod
+      - key: REDIS_URL
+        value: redis://red-cache:6379/0   # optional – remove if you don’t use Redis
