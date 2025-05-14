@@ -37,8 +37,8 @@ _HEADERS = {
     "Content-Type": "application/json",
     "User-Agent": "Omnichat/1.0 (+github.com/your-org/omnichat)",
 }
-_async_client = httpx.AsyncClient(base_url=_ADMIN_URL, headers=_HEADERS, timeout=30)
-_sync_client = httpx.Client(base_url=_ADMIN_URL, headers=_HEADERS, timeout=30)
+_async_client = httpx.AsyncClient(base_url=_ADMIN_URL, headers=_HEADERS,timeout=30, verify=False)
+_sync_client  = httpx.Client(base_url=_ADMIN_URL, headers=_HEADERS,timeout=30, verify=False)
 
 
 # ── 2.  Back-off helper (shared) ─────────────────────────────────────────────
