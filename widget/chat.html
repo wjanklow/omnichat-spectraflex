@@ -28,15 +28,23 @@ const SESSION_KEY = "spectraflex_chat_session";
 /* restore any previous session-id saved in localStorage */
 let session = localStorage.getItem(SESSION_KEY) || null;
 
-/** Turn plain URLs into clickable <a> tags */
-function linkify(str){
-  return str.replace(/(https?:\/\/[^\s]+)/g,
-    s => `<a href="${s}" target="_blank" rel="noopener">${s}</a>`);
-}
-
-/* escape <, >, & before we inject HTML */
+/** escape <, >, & before we inject HTML */
 function escapeHtml(str){
   return str.replace(/[&<>]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));
+}
+
+/** Turn Markdown links *and* bare URLs into clickable <a> tags */
+function linkify(str){
+  /* 1 . [label](https://link)         */
+  str = str.replace(
+    /\[([^\]]+)]\((https?:\/\/[^\s)]+)\)/g,
+    (_, label, url) => `<a href="${url}" target="_blank" rel="noopener">${label}</a>`
+  );
+  /* 2 . bare https://link             */
+  return str.replace(
+    /(https?:\/\/[^\s]+)/g,
+    url => `<a href="${url}" target="_blank" rel="noopener">${url}</a>`
+  );
 }
 
 /* ────────────────────────────────────────────────────────────────────────── */
