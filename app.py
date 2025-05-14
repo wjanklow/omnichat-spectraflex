@@ -4,19 +4,18 @@ omnichat.app
 FastAPI entry-point exposing:
 
 • /health               – uptime probe
-• /metrics  (optional)  – Prometheus if you wire in prometheus-fastapi-instrumentator
+• /metrics  (optional)  – Prometheus if wired in
 • /ws                   – bidirectional chat WebSocket
 
 Key integrations:
-• Error & request-log middleware (see middleware/)
-• Redis-backed rate limit + token budget
+• Error & request-log middleware
+• Redis-backed rate-limit + token budget
 • Guard-rails (OpenAI moderation, off-topic cosine)
-• Pinecone RAG + OpenAI GPT-4o answer
+• Pinecone RAG + GPT-4o answer
 """
 
 from __future__ import annotations
 
-import json
 import uuid
 from typing import List
 
@@ -28,9 +27,9 @@ from pydantic import BaseModel, ValidationError
 from omnichat_log import logger, RequestLogMiddleware
 from middleware.error import ErrorMiddleware
 from rate_limit import ip_throttle, consume_tokens
-from services.pinecone import query as pc_query, max_similarity, embed
+from services.pinecone import query as pc_query, max_similarity
 from settings import settings
-from guardrails import toxic_or_blocked, scrub  # we wrote these earlier
+from guardrails import toxic_or_blocked, scrub
 
 # ── FastAPI bootstrap ─────────────────────────────────────────────────────────
 app = FastAPI(
@@ -44,7 +43,7 @@ app.add_middleware(ErrorMiddleware)
 app.add_middleware(RequestLogMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # widget is loaded from Shopify domain
+    allow_origins=["*"],        # widget may load from any storefront domain
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -62,8 +61,11 @@ class _WsOut(BaseModel):
     answer: str
 
 
-# ── Config knobs ──────────────────────────────────────────────────────────────
-OFF_TOPIC_THRESHOLD = 0.75
+# ── Config knobs (pulling threshold from env / settings) ──────────────────────
+OFF_TOPIC_THRESHOLD: float = float(
+    getattr(settings, "off_topic_threshold", 0.60)   # default 0.60
+)
+
 MAX_OPENAI_TOKENS_PER_REPLY = 512
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -83,7 +85,6 @@ def _build_prompt(question: str, context: List[dict]) -> str:
         f"Context:\n{ctx_txt or 'NO_MATCH'}\n\n"
         f"Q: {question}\nA:"
     )
-
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 @app.get("/health")
@@ -119,7 +120,10 @@ async def chat_ws(ws: WebSocket):
                 continue
 
             # --- off-topic guard ---------------------------------------------
-            if max_similarity(req.message) < OFF_TOPIC_THRESHOLD:
+            sim = max_similarity(req.message)
+            logger.debug("cosine %.3f  msg=%s", sim, req.message)
+
+            if sim < OFF_TOPIC_THRESHOLD:
                 await ws.send_json(
                     _WsOut(
                         session=session_id,
@@ -130,22 +134,22 @@ async def chat_ws(ws: WebSocket):
 
             # --- RAG + OpenAI -------------------------------------------------
             context = _retrieve_context(req.message)
-            prompt = _build_prompt(req.message, context)
+            prompt  = _build_prompt(req.message, context)
 
             chat = openai.chat.completions.create(
                 model=settings.openai_model_chat,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=MAX_OPENAI_TOKENS_PER_REPLY,
             )
-            answer = chat.choices[0].message.content.strip()
-            tokens_used = chat.usage.total_tokens
+            answer       = chat.choices[0].message.content.strip()
+            tokens_used  = chat.usage.total_tokens
 
             if not consume_tokens(session_id, tokens_used):
                 await ws.send_json(
                     _WsOut(
                         session=session_id,
                         answer="You've reached the limit for this chat. "
-                        "Start a new conversation if needed!",
+                               "Start a new conversation if needed!",
                     ).model_dump()
                 )
                 await ws.close()
@@ -155,7 +159,7 @@ async def chat_ws(ws: WebSocket):
             await ws.send_json(_WsOut(session=session_id, answer=answer).model_dump())
 
     except WebSocketDisconnect:
-        logger.info(f"WS disconnected [{session_id}]")
-    except Exception:  # pylint: disable=broad-except
-        logger.exception(f"Unexpected WS error [{session_id}]")
+        logger.info("WS disconnected [%s]", session_id)
+    except Exception:                             # pylint: disable=broad-except
+        logger.exception("Unexpected WS error [%s]", session_id)
         await ws.close(code=1011)  # internal error

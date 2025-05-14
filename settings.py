@@ -54,6 +54,10 @@ class _Settings(BaseSettings):
     # ── REDIS ────────────────────────────────────────────────
     redis_url: RedisDsn = Field("redis://localhost:6379/0", alias="REDIS_URL")
 
+    # ── GUARD-RAILS / RAG TUNING ──────────────────────────────────────────────
+    off_topic_threshold: float = Field(0.60, alias="OFF_TOPIC_THRESHOLD")
+
+
     # ── OPTIONALS ────────────────────────────────────────────
     sentry_dsn: str | None = Field(None, alias="SENTRY_DSN")
     db_dsn: PostgresDsn | None = Field(None, alias="DATABASE_URL")
