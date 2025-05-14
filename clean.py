@@ -25,7 +25,7 @@ def main():
         delete_tag(tag["id"].split("/")[-1])
     print(f"🗑️  removed {len(tags)} old tags")
 
-    SRC = "https://taupe-vacherin-f62f9e.netlify.app/widget.min.js?v=15"
+    SRC = "https://taupe-vacherin-f62f9e.netlify.app/widget.min.js?v=22"
     new_id = add_script_tag(SRC)
     print("✅ added fresh tag:", new_id, "\n→", SRC)
 
