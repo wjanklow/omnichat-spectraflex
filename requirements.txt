@@ -16,3 +16,4 @@ pytest==8.2.0               # tests
 pytest-asyncio==0.23.5
 ruff==0.4.3                 # linter
 mypy==1.10.0                # static types
+requests>=2.31.0
