@@ -1,37 +1,92 @@
 <!doctype html>
 <html>
-<body style="margin:0;font-family:sans-serif">
-  <div id="log" style="height:90%;overflow:auto;padding:12px 16px 0;font-size:14px"></div>
-  <form id="frm" style="display:flex;padding:8px 16px;border-top:1px solid #eee">
-    <input id="msg" autocomplete="off"
-           style="flex:1;border:1px solid #ccc;border-radius:6px;padding:6px 8px;font-size:14px"
-           placeholder="Ask a question…">
+<head>
+  <meta charset="utf-8" />
+  <title>Omnichat Debug Client</title>
+  <style>
+    body { margin:0; font-family:sans-serif; }
+    #log  { height:90vh; overflow:auto; padding:12px 16px 0; font-size:14px; }
+    #frm  { display:flex; padding:8px 16px; border-top:1px solid #eee; }
+    #msg  { flex:1; border:1px solid #ccc; border-radius:6px;
+            padding:6px 8px; font-size:14px; }
+  </style>
+</head>
+
+<body>
+  <div id="log"></div>
+
+  <form id="frm">
+    <input id="msg" autocomplete="off" placeholder="Ask a question…">
   </form>
 
   <script>
-    const WS_URL = decodeURIComponent(
-        new URLSearchParams(location.search).get("ws")
-    );
-    const ws  = new WebSocket(WS_URL);
-    const log = document.getElementById("log");
+/* ────────────────────────────────────────────────────────────────────────── */
+/* 1.  Startup constants & helpers                                           */
+/* ────────────────────────────────────────────────────────────────────────── */
+const SESSION_KEY = "spectraflex_chat_session";
 
-    document.getElementById("frm").onsubmit = e => {
-      e.preventDefault();
-      const val = msg.value.trim();
-      if (!val) return;
-      ws.send(JSON.stringify({ message: val }));
-      log.innerHTML += `<p style="color:#888;margin:4px 0">${val}</p>`;
-      msg.value = "";
-      log.scrollTop = log.scrollHeight;
-    };
+/* restore any previous session-id saved in localStorage */
+let session = localStorage.getItem(SESSION_KEY) || null;
 
-    ws.onmessage = e => {
-      const d = JSON.parse(e.data);
-      const safe = d.answer.replace(/[&<>]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));
-      log.innerHTML += `<p style="margin:4px 0">${safe}</p>`;
-      log.querySelectorAll("a").forEach(a => a.target = "_blank");
-      log.scrollTop = log.scrollHeight;
-    };
+/** Turn plain URLs into clickable <a> tags */
+function linkify(str){
+  return str.replace(/(https?:\/\/[^\s]+)/g,
+    s => `<a href="${s}" target="_blank" rel="noopener">${s}</a>`);
+}
+
+/* escape <, >, & before we inject HTML */
+function escapeHtml(str){
+  return str.replace(/[&<>]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));
+}
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* 2.  WebSocket                                                             */
+/* ────────────────────────────────────────────────────────────────────────── */
+const WS_URL = decodeURIComponent(
+  new URLSearchParams(location.search).get("ws") ||
+  "wss://omnichat-spectraflex.onrender.com/ws"   // fallback when no ?ws=…
+);
+
+const ws  = new WebSocket(WS_URL);
+const log = document.getElementById("log");
+
+ws.onopen  = () => console.log("[WS] open →", WS_URL);
+ws.onclose = e  => console.log("[WS] closed", e.code, e.reason);
+ws.onerror = e  => console.error("[WS] error", e);
+
+/* incoming messages ------------------------------------------------------- */
+ws.onmessage = e => {
+  const d = JSON.parse(e.data);          // expects { session, answer }
+
+  /* remember the session-id the first time the backend sends it */
+  if (d.session && !session){
+    session = d.session;
+    localStorage.setItem(SESSION_KEY, session);
+  }
+
+  const safe = linkify(escapeHtml(d.answer));
+  log.innerHTML += `<p style="margin:4px 0">${safe}</p>`;
+  log.scrollTop  = log.scrollHeight;
+};
+
+/* ────────────────────────────────────────────────────────────────────────── */
+/* 3.  Form submit ↠ send message                                            */
+/* ────────────────────────────────────────────────────────────────────────── */
+document.getElementById("frm").onsubmit = e => {
+  e.preventDefault();
+  const val = msg.value.trim();
+  if (!val || ws.readyState !== WebSocket.OPEN) return;
+
+  ws.send(JSON.stringify({
+    session,                             // may be null on first send
+    message: val,
+    product: window.__CURRENT_PRODUCT_HANDLE__ || null
+  }));
+
+  log.innerHTML += `<p style="color:#888;margin:4px 0">${val}</p>`;
+  msg.value = "";
+  log.scrollTop = log.scrollHeight;
+};
   </script>
 </body>
 </html>
