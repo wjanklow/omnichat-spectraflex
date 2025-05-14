@@ -18,3 +18,4 @@ ruff==0.4.3                 # linter
 mypy==1.10.0                # static types
 requests>=2.31.0
 certifi
+redis[async]>=5.0
