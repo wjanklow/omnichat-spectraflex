@@ -118,6 +118,18 @@ async def health():
 @app.websocket("/ws")
 async def chat_ws(ws: WebSocket):
     await ws.accept()
+        # 0️⃣  session + greeting (runs once per connection)
+    # ------------------------------------------------------------------
+    session_id  = str(uuid.uuid4())
+
+    # merchant-scoped:  ?merchant_id=frankman   →  greeting:frankman
+    merchant_id = ws.query_params.get("merchant_id", "spectraflex")
+    greeting    = await redis.get(f"greeting:{merchant_id}") \
+                 or "🎸 Welcome to Spectraflex! Whether you’re hunting for the perfect cable, curious about custom lengths & colors, or just need quick advice on matching gear to your rig, I’ve got you covered. Tell me what you’re looking for and I’ll point you to the best fit—let’s dial in your sound!"
+
+    # push the first bubble right away
+    await ws.send_json(_WsOut(session=session_id, answer=greeting).model_dump())
+
     session_id = str(uuid.uuid4())
 
     try:
