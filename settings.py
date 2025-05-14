@@ -42,6 +42,7 @@ class _Settings(BaseSettings):
 
     # ── PINECONE ─────────────────────────────────────────────
     pinecone_api_key: SecretStr = Field(..., alias="PINECONE_API_KEY")
+    pinecone_region  : str       = Field("us-east-1", alias="PINECONE_REGION")
     pinecone_env: str = Field("us-east-1-aws", alias="PINECONE_ENV")
     pinecone_index: str = Field("spectraflex-prod", alias="PINECONE_INDEX")
 
