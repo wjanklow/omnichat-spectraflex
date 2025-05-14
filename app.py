@@ -20,6 +20,9 @@ from services.shopify_cart import create_checkout         # NEW
 from settings import settings
 from guardrails import toxic_or_blocked
 
+import os, certifi
+os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
+
 # ── short-term memory (per websocket) ────────────────────────────────────────
 _HISTORY: Dict[str, List[dict]] = {}      # session_id → [ {role, content}, … ]
 MAX_TURNS = 6
