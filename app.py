@@ -1,51 +1,83 @@
 """
 omnichat.app
 ============
-FastAPI entry‑point for Spectraflex concierge – **Redis‑backed** version
-
-Key changes vs. previous draft
-──────────────────────────────
-• **Redis** replaces the in‑memory `_HISTORY`, `_LAST_PID`, and token counters so
-  multiple Render dynos (or a restart) keep chat state alive.
-• Uses the `redis‑py` asyncio client (`redis.asyncio`) that plays nicely inside
-  FastAPI WebSocket handlers.
-• Helper fns `_get_hist()`, `_set_hist()` and siblings abstract the cache layer.
-• Removed the temporary `os.environ["REQUESTS_CA_BUNDLE"]…` workaround – you now
-  point `SSL_CERT_FILE` / `REQUESTS_CA_BUNDLE` env‑vars in Render instead.
+FastAPI entry-point for Spectraflex concierge – **Redis-backed** version
 """
 
 from __future__ import annotations
-import uuid, html, json, asyncio
-from typing import List, Dict, Any
+
+import uuid, html, json, re
+from typing import Any, List
 
 import openai
+import redis.asyncio as aioredis
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ValidationError
 
-import redis.asyncio as aioredis  # NEW – async client
-
 from omnichat_log import logger, RequestLogMiddleware
 from middleware.error import ErrorMiddleware
 from rate_limit import ip_throttle, consume_tokens
+from guardrails import toxic_or_blocked
 from services.pinecone import query as pc_query, max_similarity
 from services.shopify_cart import create_checkout
 from settings import settings
-from guardrails import toxic_or_blocked
 
-# ── Redis connection ────────────────────────────────────────────────────────
-redis_url = str(settings.redis_url)
-redis: aioredis.Redis = aioredis.from_url(redis_url, decode_responses=True)
+# ─────────────────────────────────────────────────────────────────────────────
+# Redis connection
+# ─────────────────────────────────────────────────────────────────────────────
+redis: aioredis.Redis = aioredis.from_url(
+    str(settings.redis_url), decode_responses=True
+)
 
-# ── knobs ────────────────────────────────────────────────────────────────────
-OFF_TOPIC_THRESHOLD: float = float(getattr(settings, "off_topic_threshold", 0.60))
+# ─────────────────────────────────────────────────────────────────────────────
+# Config / knobs
+# ─────────────────────────────────────────────────────────────────────────────
+OFF_TOPIC_THRESHOLD = 0.20        # ← loosened so amp/cab Qs pass
 MAX_OPENAI_TOKENS_PER_REPLY = 512
-MAX_TURNS = 6               # per session history window
-REDIS_TTL = 24 * 3600       # keep sessions for a day
+MAX_TURNS = 6                     # history window (user ⇄ bot pairs)
+REDIS_TTL = 24 * 3600             # keep sessions a day
 
 openai.api_key = settings.openai_api_key.get_secret_value()
 
-# ── FastAPI bootstrap ────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Base prompt (used by both strict RAG + fallback calls)
+# ─────────────────────────────────────────────────────────────────────────────
+BASE_PROMPT = """
+You are **Spectraflex Gear Concierge**.
+
+• You may use general knowledge about music gear (amps, cabs, guitars, pedals,
+  mixers).
+• When you recommend a cable or accessory, it must be a Spectraflex product or
+  a generic descriptor (“a 1/4-inch TS speaker cable”) that maps back to a
+  Spectraflex SKU if the shopper clicks “buy”.
+• Never recommend or endorse a competitor’s cable brand.
+• If Spectraflex doesn’t make a matching product, politely say we don’t carry it
+  and suggest the closest Spectraflex alternative.
+
+Answer clearly and helpfully.
+"""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Guard-rail: block competitor cable brands in answers
+# ─────────────────────────────────────────────────────────────────────────────
+_COMPETITOR_CABLES = re.compile(
+    r"\b(mogami|planet\s*waves|hosa|d['’]?addario|fender|ernie\s*ball)\b",
+    re.I,
+)
+
+def scrub_competitors(txt: str) -> str:
+    """If GPT ever leaks a rival cable brand, replace with brand-safe line."""
+    if _COMPETITOR_CABLES.search(txt):
+        return ("I’m sorry — I only recommend Spectraflex cables. "
+                "Here’s the closest option we make: Classic Series 1/4-inch "
+                "TS speaker cable (various lengths).")
+    return txt
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FastAPI setup
+# ─────────────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Omnichat – Spectraflex", docs_url=None, redoc_url=None)
 app.add_middleware(ErrorMiddleware)
 app.add_middleware(RequestLogMiddleware)
@@ -56,7 +88,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Schemas ──────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Pydantic I/O schemas
+# ─────────────────────────────────────────────────────────────────────────────
 class _WsIn(BaseModel):
     session: str | None = None
     message: str
@@ -65,7 +99,10 @@ class _WsOut(BaseModel):
     session: str
     answer: str
 
-# ── Redis helpers ────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Redis helpers
+# ─────────────────────────────────────────────────────────────────────────────
 async def _get_json(key: str, default: Any) -> Any:
     raw = await redis.get(key)
     return json.loads(raw) if raw else default
@@ -80,15 +117,16 @@ async def get_history(session: str) -> List[dict]:
 async def set_history(session: str, hist: List[dict]):
     await _set_json(f"hist:{session}", hist)
 
-# last recommended product ---------------------------------------------------
+# last recommended product (for “add to cart” intent) ------------------------
 async def get_last_pid(session: str) -> str | None:
     return await redis.get(f"lastpid:{session}")
 
 async def set_last_pid(session: str, pid: str):
     await redis.set(f"lastpid:{session}", pid, ex=REDIS_TTL)
 
-# ── Pinecone helpers (unchanged) ─────────────────────────────────────────────
-
+# ─────────────────────────────────────────────────────────────────────────────
+# Pinecone helpers
+# ─────────────────────────────────────────────────────────────────────────────
 def _retrieve_context(q: str, k: int = 4) -> List[dict]:
     matches = pc_query(q, k=k)
     return [
@@ -96,64 +134,110 @@ def _retrieve_context(q: str, k: int = 4) -> List[dict]:
         for m in matches if m.metadata
     ]
 
-def _build_prompt(question: str, context: List[dict]) -> str:
+def _prompt_with_context(question: str, ctx: List[dict]) -> str:
     ctx_txt = "\n".join(
-        f"- {html.unescape(c['title'])} (https://{settings.shop_url.host}/products/{c['handle']}) score={c['score']:.2f}"
-        for c in context if "title" in c
+        f"- {html.unescape(c['title'])} "
+        f"(https://{settings.shop_url.host}/products/{c['handle']}) "
+        f"score={c['score']:.2f}"
+        for c in ctx if "title" in c
     ) or "NO_MATCH"
     return (
-        "You are Spectraflex Gear Concierge. Answer only about Spectraflex products. If unsure, say you don't know.\n\n"
-        f"Context:\n{ctx_txt}\n\nQ: {question}\nA:"
+        BASE_PROMPT +
+        f"\n\nContext:\n{ctx_txt}\n\nQ: {question}\nA:"
     )
 
-# ── routes ───────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Dual-path answer helper
+# ─────────────────────────────────────────────────────────────────────────────
+async def smart_answer(
+    user_q: str,
+    context: list[dict],
+    hist: list[dict],
+) -> tuple[str, int]:
+    """1) strict product RAG, 2) brand-safe general fallback.
+    Returns: (answer, tokens_used)
+    """
+    # --- strict path -------------------------------------------------------
+    prompt = _prompt_with_context(user_q, context)
+    chat   = openai.chat.completions.create(
+        model = settings.openai_model_chat,
+        messages = hist + [{"role":"system", "content": prompt}],
+        max_tokens = MAX_OPENAI_TOKENS_PER_REPLY,
+    )
+    answer       = chat.choices[0].message.content.strip()
+    tokens_spent = chat.usage.total_tokens
+
+    # if GPT gives up, use fallback reasoning
+    if answer.lower().startswith(("i don't know", "i do not know", "unsure")):
+        loose_prompt = (
+            BASE_PROMPT +
+            "\n\n(You didn’t find an exact Spectraflex product above. "
+            "Use your broad gear knowledge to advise, but still steer "
+            "toward a Spectraflex cable when appropriate.)"
+            f"\n\nQ: {user_q}\nA:"
+        )
+        chat2   = openai.chat.completions.create(
+            model = settings.openai_model_chat,
+            messages = hist + [{"role":"system", "content": loose_prompt}],
+            max_tokens = MAX_OPENAI_TOKENS_PER_REPLY,
+        )
+        answer        = chat2.choices[0].message.content.strip()
+        tokens_spent += chat2.usage.total_tokens
+
+    return scrub_competitors(answer), tokens_spent
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Routes
+# ─────────────────────────────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
     try:
         await redis.ping()
         return {"status": "ok"}
-    except Exception:  # pragma: no cover
+    except Exception:
         return {"status": "degraded", "redis": "unreachable"}
+
 
 @app.websocket("/ws")
 async def chat_ws(ws: WebSocket):
     await ws.accept()
-        # 0️⃣  session + greeting (runs once per connection)
-    # ------------------------------------------------------------------
+
+    # 0️⃣ greeting ----------------------------------------------------------
     session_id  = str(uuid.uuid4())
-
-    # merchant-scoped:  ?merchant_id=frankman   →  greeting:frankman
     merchant_id = ws.query_params.get("merchant_id", "spectraflex")
-    greeting    = await redis.get(f"greeting:{merchant_id}") \
-                 or "🎸 Welcome to Spectraflex! Whether you’re hunting for the perfect cable, curious about custom lengths & colors, or just need quick advice on matching gear to your rig, I’ve got you covered. Tell me what you’re looking for and I’ll point you to the best fit—let’s dial in your sound!"
-
-    # push the first bubble right away
+    greeting    = await redis.get(f"greeting:{merchant_id}") or (
+        "🎸 Welcome to Spectraflex! Whether you’re hunting for the perfect "
+        "cable, curious about custom lengths & colours, or just need quick "
+        "advice on matching gear to your rig, I’ve got you covered. Tell me "
+        "what you’re after and I’ll point you to the best fit—let’s dial in "
+        "your sound!"
+    )
     await ws.send_json(_WsOut(session=session_id, answer=greeting).model_dump())
-
-    session_id = str(uuid.uuid4())
 
     try:
         while True:
             raw = await ws.receive_text()
 
-            # ── validation ────────────────────────────────────────────────
+            # ── validation -------------------------------------------------
             try:
                 req = _WsIn.model_validate_json(raw)
             except ValidationError as e:
-                await ws.send_json({"error": "Invalid payload", "details": e.errors()})
+                await ws.send_json({"error": "Invalid payload",
+                                    "details": e.errors()})
                 continue
 
-            # ── throttles & guardrails ────────────────────────────────────
+            # ── guardrails & rate limiting ---------------------------------
             ip = ws.client.host
             if not ip_throttle(ip):
                 await ws.close(code=4008, reason="Rate limit"); break
 
             if toxic_or_blocked(req.message):
                 await ws.send_json(_WsOut(session=session_id,
-                                           answer="Sorry, can’t help with that.").model_dump())
+                                          answer="Sorry—can’t help with that.").model_dump())
                 continue
 
-            # ── cart intent ------------------------------------------------
+            # ── instant add-to-cart intent --------------------------------
             text_l = req.message.lower()
             if "cart" in text_l and any(k in text_l for k in ("add", "buy", "purchase")):
                 pid = await get_last_pid(session_id)
@@ -161,20 +245,18 @@ async def chat_ws(ws: WebSocket):
                     await ws.send_json(_WsOut(session=session_id,
                                               answer="Which cable would you like to add?").model_dump())
                     continue
-                checkout_url = create_checkout(pid)
+                checkout = create_checkout(pid)
                 await ws.send_json(_WsOut(session=session_id,
-                                          answer=f"✅ Added! Finish checkout here: {checkout_url}").model_dump())
+                                          answer=f"✅ Added! Finish checkout here: {checkout}").model_dump())
                 continue
 
-            # ── RAG guard --------------------------------------------------
-            sim = max_similarity(req.message)
-            logger.debug("sim %.3f  | %s", sim, req.message)
-            if sim < OFF_TOPIC_THRESHOLD:
+            # ── off-topic gate (non-gear chit-chat etc.) -------------------
+            if max_similarity(req.message) < OFF_TOPIC_THRESHOLD:
                 await ws.send_json(_WsOut(session=session_id,
                                           answer="I’m here for Spectraflex gear questions only 😊").model_dump())
                 continue
 
-            # ── context & memory ------------------------------------------
+            # ── retrieve context + update memory ---------------------------
             context = _retrieve_context(req.message)
             if context:
                 await set_last_pid(session_id, context[0]["id"])
@@ -183,28 +265,20 @@ async def chat_ws(ws: WebSocket):
             hist.append({"role": "user", "content": req.message})
             hist[:] = hist[-MAX_TURNS:]
 
-            sys_prompt = _build_prompt(req.message, context)
-            messages  = hist + [{"role": "system", "content": sys_prompt}]
-
-            # ── GPT call ---------------------------------------------------
-            chat = openai.chat.completions.create(
-                model=settings.openai_model_chat,
-                messages=messages,
-                max_tokens=MAX_OPENAI_TOKENS_PER_REPLY,
-            )
-            answer = chat.choices[0].message.content.strip()
+            # ── GPT answer --------------------------------------------------
+            answer, spent = await smart_answer(req.message, context, hist)
             hist.append({"role": "assistant", "content": answer})
             await set_history(session_id, hist)
 
-            tokens_used = chat.usage.total_tokens
-            if not consume_tokens(session_id, tokens_used):
-                await ws.send_json(_WsOut(session_id, "Token budget exhausted.").model_dump())
+            if not consume_tokens(session_id, spent):
+                await ws.send_json(_WsOut(session=session_id,
+                                          answer="Token budget exhausted.").model_dump())
                 await ws.close(); break
 
             await ws.send_json(_WsOut(session=session_id, answer=answer).model_dump())
 
     except WebSocketDisconnect:
         logger.info("WS disconnected [%s]", session_id)
-    except Exception:   # pylint: disable=broad-except
+    except Exception:                     # pylint: disable=broad-except
         logger.exception("WS error [%s]", session_id)
         await ws.close(code=1011)
