@@ -150,7 +150,7 @@ async def chat_ws(ws: WebSocket):
                 await ws.send_json(_WsOut(session_id, "Token budget exhausted.").model_dump())
                 await ws.close(); break
 
-            await ws.send_json(_WsOut(session_id, answer).model_dump())
+            await ws.send_json(_WsOut(session=session_id, answer=answer).model_dump())
 
     except WebSocketDisconnect:
         logger.info("WS disconnected [%s]", session_id)
