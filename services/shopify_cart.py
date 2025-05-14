@@ -1,7 +1,7 @@
 import requests, json
 from settings import settings
 
-_URL = f"https://{settings.shop_url.removeprefix('https://')}/api/2024-04/graphql.json"
+_URL = f"https://{settings.shop_url.host}/api/2024-04/graphql.json"
 _HEADERS = {
     "X-Shopify-Storefront-Access-Token": settings.storefront_token.get_secret_value(),
     "Content-Type": "application/json",
