@@ -125,31 +125,35 @@ function linkify(str){
   );
 }
 function timestamp(){return new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});}
+
 function addBubble(role, html){
-  /* current implementation … */
+  const wrap  = document.createElement("div");
+  wrap.className = `wrapper ${role}`;
+
+  const label = document.createElement("div");
+  label.className = "sender";
+  label.textContent = role === "bot" ? `🎸 ${BOT_NAME}` : "You";
+  wrap.appendChild(label);
+
+  const div = document.createElement("div");
+  div.className = "bubble";
+  div.innerHTML = html;
+  div.title = timestamp();
+  wrap.appendChild(div);
+
   log.appendChild(wrap);
 
-  // ╭─ NEW: inject “Add to cart” buttons when the bot cites a product ──╮
+  // Inject “Add to cart” buttons when the bot cites a product
   if (role === "bot") {
-    wrap.querySelectorAll(".bubble").forEach(bub => {
-      bub.innerHTML = bub.innerHTML.replace(
-        /{v:([^}]+)}/g,
-        (_, vid) => ` <button class="addBtn" data-vid="${vid}">Add&nbsp;to&nbsp;cart</button>`
-      );
-    });
+    div.innerHTML = div.innerHTML.replace(
+      /{v:([^}]+)}/g,
+      (_, vid) =>
+        ` <button class="addBtn" data-vid="${vid}">Add&nbsp;to&nbsp;cart</button>`
+    );
   }
   log.scrollTop = log.scrollHeight;
 }
 
-// click-delegate for Add buttons
-log.addEventListener("click", e => {
-  if(!e.target.classList.contains("addBtn")) return;
-  const vid = e.target.dataset.vid;
-  if(ws.readyState!==WebSocket.OPEN) return;
-  ws.send(JSON.stringify({ session, action:"checkout", variant: vid, qty:1 }));
-  e.target.disabled = true;
-  e.target.textContent = "⏳ Adding…";
-});
 
 /***** WEBSOCKET SETUP *****/
 const WS_URL = decodeURIComponent(

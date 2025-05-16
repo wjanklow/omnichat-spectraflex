@@ -279,6 +279,17 @@ async def chat_ws(ws: WebSocket):
             # ── validation -------------------------------------------------
             try:
                 req = _WsIn.model_validate_json(raw)
+                if req.action == "checkout" and req.variant:
+                    url = create_checkout(req.variant, qty=req.qty or 1)
+                    await ws.send_json(
+                        _WsOut(
+                            session=session_id,
+                            answer=f"✅ Added! [Secure checkout]({url})",
+                        ).model_dump()
+                    )
+                    continue
+                if req.message is None:
+                    continue
             except ValidationError as e:
                 await ws.send_json({"error": "Invalid payload",
                                    "details": e.errors()})
@@ -306,7 +317,7 @@ async def chat_ws(ws: WebSocket):
                 continue
 
             # ── instant add-to-cart intent --------------------------------
-            text_l = req.message.lower()
+            text_l = (req.message or "").lower()
             if "cart" in text_l and any(k in text_l for k in ("add", "buy", "purchase",)):
                 pid = await get_last_pid(session_id)
                 if not pid:
