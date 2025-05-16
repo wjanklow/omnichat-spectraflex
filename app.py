@@ -270,7 +270,7 @@ async def chat_ws(ws: WebSocket):
 
             # ── instant add-to-cart intent --------------------------------
             text_l = req.message.lower()
-            if "cart" in text_l and any(k in text_l for k in ("add", "buy", "purchase")):
+            if "cart" in text_l and any(k in text_l for k in ("add", "buy", "purchase",)):
                 pid = await get_last_pid(session_id)
                 if not pid:
                     await ws.send_json(_WsOut(session=session_id,
@@ -290,7 +290,9 @@ async def chat_ws(ws: WebSocket):
             # ── retrieve context + update memory ---------------------------
             context = _retrieve_context(req.message)
             if context:
-                await set_last_pid(session_id, context[0]["id"])
+                meta         = context[0]
+                variant_gid  = meta.get("variantId") or meta["id"]
+                await set_last_pid(session_id, variant_gid)
 
             hist = await get_history(session_id)
             hist.append({"role": "user", "content": req.message})
