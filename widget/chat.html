@@ -123,13 +123,6 @@ function linkify(str){
     (_, lbl, url) => `<a href="${url}">${lbl}</a>`
   );
 }
-
-  // bare URLs
-  return str.replace(
-    /(https?:\/\/[^\s]+)/g,
-    url => `<a href="${url}" target="_blank" rel="noopener">${url}</a>`
-  );
-}
 function timestamp(){return new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});}
 function addBubble(role, html){
   const wrap  = document.createElement("div");
