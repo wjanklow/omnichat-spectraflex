@@ -168,15 +168,32 @@ def _retrieve_context(q: str, k: int = 4) -> List[dict]:
     ]
 
 def _prompt_with_context(question: str, ctx: List[dict]) -> str:
-    ctx_txt = "\n".join(
-        f"- {html.unescape(c['title'])} "
-        f"({c.get('url') or f'https://{settings.shop_url.host}/products/{c.get('handle','')}'}) "
-        f"score={c['score']:.2f}"
-        for c in ctx if "title" in c
-    ) or "NO_MATCH"
+    """
+    Build the system-plus-context prompt that feeds the LLM.
+
+    • Each context entry renders as:
+      - <title> (<canonical URL>) score=<sim>
+    • Falls back to a handle-based URL if `url` is missing.
+    • Returns "NO_MATCH" when retrieval comes back empty.
+    """
+
+    ctx_lines = []
+    for c in ctx:
+        title = html.unescape(c.get("title", ""))
+        if not title:
+            continue                              # skip entries without a title
+
+        url = c.get("url") or (
+            f"https://{settings.shop_url.host}/products/{c.get('handle', '')}"
+        )
+        score = c.get("score", 0.0)
+        ctx_lines.append(f"- {title} ({url}) score={score:.2f}")
+
+    ctx_txt = "\n".join(ctx_lines) or "NO_MATCH"
+
     return (
-        BASE_PROMPT +
-        f"\n\nContext:\n{ctx_txt}\n\nQ: {question}\nA:"
+        BASE_PROMPT
+        + f"\n\nContext:\n{ctx_txt}\n\nQ: {question}\nA:"
     )
 
 # ─────────────────────────────────────────────────────────────────────────────
