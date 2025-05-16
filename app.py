@@ -74,6 +74,8 @@ Link & formatting rules
  • When you cite a product, use ONE line of Markdown only **and append the
    variant marker** so the UI can attach a button:
    - [{{title}}]({{url}}) {v:{{variantId}}}
+   
+   make sure you provide a link for any product that you bring up to the customer.
 
 Do NOT output any raw HTML tags or additional attributes.
   – The RAG context already feeds you each product’s *title* and *handle*.
