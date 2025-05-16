@@ -117,10 +117,17 @@ let   session     = localStorage.getItem(SESSION_KEY) || null;
 const log = document.getElementById("log");
 function escapeHtml(str){return str.replace(/[&<>]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[m]));}
 function linkify(str){
-  str = str.replace(/\[([^\]]+)]\((https?:\/\/[^\s)]+)\)/g,
-                    (_,lbl,url)=>`<a href="${url}" target="_blank" rel="noopener">${lbl}</a>`);
-  return str.replace(/(https?:\/\/[^\s]+)/g,
-                    url=>`<a href="${url}" target="_blank" rel="noopener">${url}</a>`);
+  // markdown-style [label](url)
+  str = str.replace(
+    /\[([^\]]+)]\((https?:\/\/[^\s)]+)\)/g,
+    (_, lbl, url) => `<a href="${url}" target="_blank" rel="noopener">${lbl}</a>`
+  );
+
+  // bare URLs
+  return str.replace(
+    /(https?:\/\/[^\s]+)/g,
+    url => `<a href="${url}" target="_blank" rel="noopener">${url}</a>`
+  );
 }
 function timestamp(){return new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"});}
 function addBubble(role, html){
