@@ -279,17 +279,6 @@ async def chat_ws(ws: WebSocket):
             # ── validation -------------------------------------------------
             try:
                 req = _WsIn.model_validate_json(raw)
-                if req.action == "checkout" and req.variant:
-                    url = create_checkout(req.variant, qty=req.qty or 1)
-                    await ws.send_json(
-                        _WsOut(
-                            session=session_id,
-                            answer=f"✅ Added! [Secure checkout]({url})",
-                        ).model_dump()
-                    )
-                    continue
-                if req.message is None:
-                    continue
             except ValidationError as e:
                 await ws.send_json({"error": "Invalid payload",
                                    "details": e.errors()})
@@ -304,6 +293,9 @@ async def chat_ws(ws: WebSocket):
                         answer=f"✅ Added! [Secure checkout]({url})",
                     ).model_dump()
                 )
+                continue
+            # ⚠️  payloads triggered by that button have no chat text
+            if not req.message:
                 continue
 
             # ── guardrails & rate limiting ---------------------------------
