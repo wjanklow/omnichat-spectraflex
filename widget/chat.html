@@ -159,10 +159,21 @@ ws.onopen   = () => console.log("[WS] open →", WS_URL);
 ws.onclose  = e  => console.log("[WS] closed", e.code, e.reason);
 ws.onerror  = e  => console.error("[WS] error", e);
 ws.onmessage = e => {
-  hideThinking();
+  +  hideThinking();
   const d = JSON.parse(e.data);
-  if(d.session && !session){ session = d.session; localStorage.setItem(SESSION_KEY, session);}  
-  addBubble("bot", linkify(escapeHtml(d.answer)));
+  if (d.session && !session) {
+    session = d.session;
+    localStorage.setItem(SESSION_KEY, session);
+  }
+
+  // 1️⃣ turn Markdown / bare URLs into real anchors
+  // 2️⃣ escape anything *other* than our new <a> tags
+  const html = escapeHtml(linkify(d.answer))
+                 // …but un-escape the anchors we just inserted:
+                 .replace(/&lt;a ([^&]+)&gt;/g,  '<a $1>')
+                 .replace(/&lt;\/a&gt;/g,        '</a>');
+
+  addBubble("bot", html);
 };
 
 /***** FORM HANDLER *****/
