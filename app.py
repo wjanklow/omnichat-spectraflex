@@ -22,6 +22,8 @@ from guardrails import toxic_or_blocked
 from services.pinecone import query as pc_query, max_similarity
 from services.shopify_cart import create_checkout
 from settings import settings
+from fastapi.staticfiles import StaticFiles
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Redis connection
@@ -87,6 +89,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# ── expose the front-end widget files ───────────────────────────
+app.mount(
+    "/widget",                          # URL prefix
+    StaticFiles(directory="widget", html=True),
+    name="widget",
+)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Pydantic I/O schemas
