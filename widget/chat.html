@@ -2,80 +2,91 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Omnichat Debug Client</title>
+  <title>Omnichat Client</title>
+
+  <!-- 👇 ZERO-CACHE so updates show instantly -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma"        content="no-cache">
+  <meta http-equiv="Expires"       content="0">
 
   <style>
-    /* ── layout basics ────────────────────────────────────────────── */
-    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,sans-serif; }
+  /* ───────── base layout ───────────────────────────────────────────── */
+  :root {
+    --blue: #007aff;
+    --grey: #e5e5ea;
+  }
+  html,body { height:100%; margin:0; font-family:-apple-system,BlinkMacSystemFont,sans-serif; }
 
-    /* message log: flex column so bubbles self-align left/right */
-    #log  {
-      height:90vh; overflow:auto; padding:16px;
-      display:flex; flex-direction:column; gap:8px;
-      background:#fafafa; font-size:15px;
-    }
+  /* widget container (set your own width/position in parent site) */
+  .chatbox {
+    width: 340px; max-height: 90vh;
+    display:flex; flex-direction:column;
+    background:#fff; border-radius:14px;
+    box-shadow:0 6px 18px rgba(0,0,0,.15);
+    overflow:hidden;
+  }
 
-    /* bottom input bar */
-    #frm  {
-      display:flex; padding:12px 16px;
-      border-top:1px solid #e5e5e5; background:#fff;
-    }
-    #msg  {
-      flex:1; border:1px solid #ccc; border-radius:20px;
-      padding:10px 14px; font-size:15px;
-    }
+  /* message log */
+  #log {
+    flex:1 1 auto; padding:12px 14px; overflow-y:auto;
+    display:flex; flex-direction:column; gap:10px;
+    background:#fafafa;
+    scroll-behavior:smooth;
+  }
+  /* sleek scrollbar */
+  #log::-webkit-scrollbar { width:6px; }
+  #log::-webkit-scrollbar-thumb { background:#ccc; border-radius:3px; }
+  #log { scrollbar-width:thin; scrollbar-color:#ccc transparent; }
 
-    /* ── chat bubbles à la iMessage ──────────────────────────────── */
-    .bubble {
-      max-width:80%; padding:10px 14px; border-radius:20px;
-      line-height:1.35; word-break:break-word;
-    }
-    .bot  { background:#e5e5ea; color:#000;
-            align-self:flex-start; border-bottom-left-radius:4px; }
-    .user { background:#007aff; color:#fff;
-            align-self:flex-end;   border-bottom-right-radius:4px; }
+  /* input bar */
+  #frm {
+    flex:0 0 auto; display:flex; gap:10px;
+    padding:10px 14px; background:#fff; border-top:1px solid #e0e0e0;
+  }
+  #msg {
+    flex:1; font-size:15px;
+    padding:10px 14px; border:1px solid #d0d0d0; border-radius:20px;
+    outline:none;
+  }
 
-    /* links stay legible inside bubbles */
-    a { color:inherit; text-decoration:underline; }
+  /* bubbles */
+  .bubble {
+    max-width:78%; padding:10px 14px; border-radius:20px;
+    line-height:1.35; word-break:break-word; white-space:pre-wrap;
+  }
+  .bot  { background:var(--grey);  color:#000;
+          align-self:flex-start; border-bottom-left-radius:6px; }
+  .user { background:var(--blue); color:#fff;
+          align-self:flex-end;   border-bottom-right-radius:6px; }
+
+  /* links in bubbles */
+  .bubble a { color:inherit; text-decoration:underline; }
   </style>
 </head>
 
 <body>
-  <div id="log"></div>
+  <div class="chatbox">
+    <div id="log"></div>
 
-  <form id="frm">
-    <input id="msg" autocomplete="off" placeholder="Ask a question…">
-  </form>
+    <form id="frm">
+      <input id="msg" autocomplete="off" placeholder="Ask a question…">
+    </form>
+  </div>
 
   <script>
-/* ────────────────────────────────────────────────────────────────────────── */
-/* 1.  Startup constants & helpers                                           */
-/* ────────────────────────────────────────────────────────────────────────── */
+/* ─────────── 1. helpers ─────────────────────────────────────── */
 const SESSION_KEY = "spectraflex_chat_session";
-
-/* restore any previous session-id saved in localStorage */
 let session = localStorage.getItem(SESSION_KEY) || null;
 
-/** escape <, >, & before we inject HTML */
 function escapeHtml(str){
   return str.replace(/[&<>]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));
 }
-
-/** Turn Markdown links *and* bare URLs into clickable <a> tags */
 function linkify(str){
-  /* 1 . [label](https://link) */
-  str = str.replace(
-    /\[([^\]]+)]\((https?:\/\/[^\s)]+)\)/g,
-    (_, label, url) => `<a href="${url}" target="_blank" rel="noopener">${label}</a>`
-  );
-  /* 2 . bare https://link */
-  return str.replace(
-    /(https?:\/\/[^\s]+)/g,
-    url => `<a href="${url}" target="_blank" rel="noopener">${url}</a>`
-  );
+  str = str.replace(/\[([^\]]+)]\((https?:\/\/[^\s)]+)\)/g,
+                    (_, lbl,url)=>`<a href="${url}" target="_blank" rel="noopener">${lbl}</a>`);
+  return str.replace(/(https?:\/\/[^\s]+)/g,
+                    url=>`<a href="${url}" target="_blank" rel="noopener">${url}</a>`);
 }
-
-/** add a left- or right-aligned bubble to the log */
 function addBubble(role, html){
   const div = document.createElement("div");
   div.className = `bubble ${role}`;
@@ -84,14 +95,11 @@ function addBubble(role, html){
   log.scrollTop = log.scrollHeight;
 }
 
-/* ────────────────────────────────────────────────────────────────────────── */
-/* 2.  WebSocket                                                             */
-/* ────────────────────────────────────────────────────────────────────────── */
+/* ─────────── 2. WebSocket setup ─────────────────────────────── */
 const WS_URL = decodeURIComponent(
   new URLSearchParams(location.search).get("ws") ||
-  "wss://omnichat-spectraflex.onrender.com/ws"   // fallback when no ?ws=…
+  "wss://omnichat-spectraflex.onrender.com/ws"
 );
-
 const ws  = new WebSocket(WS_URL);
 const log = document.getElementById("log");
 
@@ -99,29 +107,24 @@ ws.onopen  = () => console.log("[WS] open →", WS_URL);
 ws.onclose = e  => console.log("[WS] closed", e.code, e.reason);
 ws.onerror = e  => console.error("[WS] error", e);
 
-/* incoming messages ------------------------------------------------------- */
 ws.onmessage = e => {
-  const d = JSON.parse(e.data);          // expects { session, answer }
+  const d = JSON.parse(e.data);          // { session, answer }
 
-  /* remember the session-id the first time the backend sends it */
   if (d.session && !session){
     session = d.session;
     localStorage.setItem(SESSION_KEY, session);
   }
-
   addBubble("bot", linkify(escapeHtml(d.answer)));
 };
 
-/* ────────────────────────────────────────────────────────────────────────── */
-/* 3.  Form submit ↠ send message                                            */
-/* ────────────────────────────────────────────────────────────────────────── */
+/* ─────────── 3. send form handler ───────────────────────────── */
 document.getElementById("frm").onsubmit = e => {
   e.preventDefault();
   const val = msg.value.trim();
   if (!val || ws.readyState !== WebSocket.OPEN) return;
 
   ws.send(JSON.stringify({
-    session,                             // may be null on first send
+    session,
     message: val,
     product: window.__CURRENT_PRODUCT_HANDLE__ || null
   }));
