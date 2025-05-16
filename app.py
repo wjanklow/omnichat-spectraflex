@@ -170,7 +170,7 @@ def _retrieve_context(q: str, k: int = 4) -> List[dict]:
 def _prompt_with_context(question: str, ctx: List[dict]) -> str:
     ctx_txt = "\n".join(
         f"- {html.unescape(c['title'])} "
-        f"(https://{settings.shop_url.host}/products/{c['handle']}) "
+        f"({c.get('url') or f'https://{settings.shop_url.host}/products/{c.get('handle','')}'}) "
         f"score={c['score']:.2f}"
         for c in ctx if "title" in c
     ) or "NO_MATCH"
