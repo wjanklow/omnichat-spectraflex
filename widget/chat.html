@@ -117,11 +117,12 @@ let   session     = localStorage.getItem(SESSION_KEY) || null;
 const log = document.getElementById("log");
 function escapeHtml(str){return str.replace(/[&<>]/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[m]));}
 function linkify(str){
-  // markdown-style [label](url)
-  str = str.replace(
+  // markdown links → plain <a>
+  return str.replace(
     /\[([^\]]+)]\((https?:\/\/[^\s)]+)\)/g,
-    (_, lbl, url) => `<a href="${url}" target="_blank" rel="noopener">${lbl}</a>`
+    (_, lbl, url) => `<a href="${url}">${lbl}</a>`
   );
+}
 
   // bare URLs
   return str.replace(
