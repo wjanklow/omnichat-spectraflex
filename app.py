@@ -126,7 +126,10 @@ app.mount(
 # ─────────────────────────────────────────────────────────────────────────────
 class _WsIn(BaseModel):
     session: str | None = None
-    message: str
+    message: str | None = None
+    action: str | None = None
+    variant: str | None = None
+    qty: int | None = None 
 
 class _WsOut(BaseModel):
     session: str
@@ -187,7 +190,11 @@ def _prompt_with_context(question: str, ctx: List[dict]) -> str:
             f"https://{settings.shop_url.host}/products/{c.get('handle', '')}"
         )
         score = c.get("score", 0.0)
-        ctx_lines.append(f"- {title} ({url}) score={score:.2f}")
+        ctx_lines.append(
+            f"- [{title}]({url}) {{v:{c.get('variantId', c['id'])}}} "
+            f"score={score:.2f}"
+        )
+
 
     ctx_txt = "\n".join(ctx_lines) or "NO_MATCH"
 
@@ -274,7 +281,18 @@ async def chat_ws(ws: WebSocket):
                 req = _WsIn.model_validate_json(raw)
             except ValidationError as e:
                 await ws.send_json({"error": "Invalid payload",
-                                    "details": e.errors()})
+                                   "details": e.errors()})
+                continue
+
+            # ── button-driven checkout -----------------------------------
+            if req.action == "checkout" and req.variant:
+                url = create_checkout(req.variant, qty=req.qty or 1)
+                await ws.send_json(
+                    _WsOut(
+                        session=session_id,
+                        answer=f"✅ Added! [Secure checkout]({url})",
+                    ).model_dump()
+                )
                 continue
 
             # ── guardrails & rate limiting ---------------------------------
